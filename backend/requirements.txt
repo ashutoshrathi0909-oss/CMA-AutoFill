@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+httpx
+supabase==2.10.0
+gotrue==2.10.0
+google-generativeai
+openpyxl
+pdfplumber
+python-multipart
