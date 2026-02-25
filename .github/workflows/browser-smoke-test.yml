@@ -1,20 +1,65 @@
-name: Browser Smoke Test
+name: Local Smoke Test (CI)
 on:
-  deployment_status:  # Runs every time Vercel finishes deploying
-  workflow_dispatch:  # Also allow manual trigger
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   smoke-test:
-    # Only run when the deployment is ready (not on queued/pending)
-    if: github.event_name == 'workflow_dispatch' || github.event.deployment_status.state == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # ── Backend setup ──────────────────────────────────────────────────────
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend dependencies
+        run: |
+          if [ -f backend/requirements.txt ]; then
+            pip install -r backend/requirements.txt
+          else
+            echo "No backend yet — skipping"
+          fi
+
+      - name: Start backend (if exists)
+        run: |
+          if [ -f backend/main.py ]; then
+            cd backend
+            uvicorn main:app --port 8000 &
+            sleep 4
+            curl -sf http://localhost:8000/health | python3 -m json.tool
+          else
+            echo "No backend/main.py yet — skipping backend start"
+          fi
+
+      # ── Frontend setup ─────────────────────────────────────────────────────
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      - name: Install frontend dependencies
+        run: |
+          if [ -f frontend/package.json ]; then
+            cd frontend && npm ci
+          else
+            echo "No frontend yet — skipping"
+          fi
+
+      - name: Start frontend (if exists)
+        run: |
+          if [ -f frontend/package.json ]; then
+            cd frontend
+            npm run dev &
+            sleep 8
+          else
+            echo "No frontend yet — skipping"
+          fi
+
+      # ── Playwright smoke tests ─────────────────────────────────────────────
       - name: Install Playwright
         run: |
           npm install -D @playwright/test
@@ -22,10 +67,16 @@ jobs:
 
       - name: Run smoke tests
         env:
-          APP_URL: ${{ secrets.VERCEL_PRODUCTION_URL }}
-        run: npx playwright test smoke.test.ts --reporter=list
+          APP_URL: http://localhost:3000
+          BACKEND_URL: http://localhost:8000
+        run: |
+          if [ -f smoke.test.ts ]; then
+            npx playwright test smoke.test.ts --reporter=list
+          else
+            echo "No smoke.test.ts yet — skipping"
+          fi
 
-      - name: Upload test report on failure
+      - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
