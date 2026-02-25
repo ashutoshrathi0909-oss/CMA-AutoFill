@@ -60,7 +60,7 @@ Auto-debug procedure:
 
 ## 🏁 Current Status & Roadmap
 - [x] Phase 00: Prerequisites (in progress — Vercel pending)
-- [ ] Phase 01: Project Init (Next)
+- [x] Phase 01: Project Init — ✅ Next.js 15 frontend (`:3000`), FastAPI backend (`:8000`), Supabase connected. Note: `gotrue` pinned to `2.10.0` (pure-Python wheel) to avoid Rust DLL blocked by Windows WDAC. `supabase` pinned to `2.10.0`.
 - [ ] Phase 02: Database schema & RLS
 - [ ] Phase 03: API CRUD
 - [ ] Phase 04: Document extraction
