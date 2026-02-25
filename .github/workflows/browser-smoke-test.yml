@@ -1,0 +1,34 @@
+name: Browser Smoke Test
+on:
+  deployment_status:  # Runs every time Vercel finishes deploying
+  workflow_dispatch:  # Also allow manual trigger
+
+jobs:
+  smoke-test:
+    # Only run when the deployment is ready (not on queued/pending)
+    if: github.event_name == 'workflow_dispatch' || github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          npm install -D @playwright/test
+          npx playwright install --with-deps chromium
+
+      - name: Run smoke tests
+        env:
+          APP_URL: ${{ secrets.VERCEL_PRODUCTION_URL }}
+        run: npx playwright test smoke.test.ts --reporter=list
+
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
