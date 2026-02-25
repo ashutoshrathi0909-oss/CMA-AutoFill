@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment files (SECRETS - never commit!)
+.env
+.env.local
+.env.production
+backend/.env
+frontend/.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build outputs
+frontend/.next/
+frontend/out/
+backend/__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Generated files
+*.xlsm
+*.xlsx
+!reference/*.xls
+!reference/*.xlsm
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+.pytest_cache/
+htmlcov/
