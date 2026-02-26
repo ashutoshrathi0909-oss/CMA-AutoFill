@@ -1,0 +1,12 @@
+from fastapi import APIRouter
+from app.api.v1.endpoints import auth, health, clients, projects, files, dashboard
+
+api_router = APIRouter()
+
+# Group endpoints
+api_router.include_router(auth.router, tags=["auth"])
+api_router.include_router(clients.router, prefix="/clients", tags=["clients"])
+api_router.include_router(projects.router, prefix="/projects", tags=["projects"])
+api_router.include_router(files.router, tags=["files"])
+api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+api_router.include_router(health.router, prefix="/health", tags=["health"])

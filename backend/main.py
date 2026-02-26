@@ -1,8 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.api.v1.router import api_router
 from app.db.supabase_client import get_supabase
 
 app = FastAPI(title="CMA AutoFill", version="1.0.0")
+
+app.include_router(api_router, prefix="/api/v1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,3 +30,4 @@ def health_db():
         return {"status": "connected", "database": "cma-autofill"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+

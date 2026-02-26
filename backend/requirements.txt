@@ -9,3 +9,4 @@ google-generativeai
 openpyxl
 pdfplumber
 python-multipart
+PyJWT
