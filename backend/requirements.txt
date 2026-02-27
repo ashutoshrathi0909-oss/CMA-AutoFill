@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 python-dotenv
 pydantic
+email-validator
 httpx
 supabase==2.10.0
 gotrue==2.10.0
@@ -10,3 +11,4 @@ openpyxl
 pdfplumber
 python-multipart
 PyJWT
+pytest

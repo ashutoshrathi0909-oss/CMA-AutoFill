@@ -48,7 +48,8 @@ def list_clients(
     query = db.table("clients").select("*", count="exact").eq("firm_id", str(current_user.firm_id))
     
     if search:
-        query = query.ilike("name", f"%{search}%")
+        safe_search = search.replace("%", "\\%").replace("_", "\\_")
+        query = query.ilike("name", f"%{safe_search}%")
     if entity_type:
         query = query.eq("entity_type", entity_type)
     if not include_inactive:

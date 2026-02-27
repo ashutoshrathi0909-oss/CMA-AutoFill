@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, health, clients, projects, files, dashboard
+from app.api.v1.endpoints import auth, clients, projects, files, dashboard
 
 api_router = APIRouter()
 
@@ -9,4 +9,3 @@ api_router.include_router(clients.router, prefix="/clients", tags=["clients"])
 api_router.include_router(projects.router, prefix="/projects", tags=["projects"])
 api_router.include_router(files.router, tags=["files"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
-api_router.include_router(health.router, prefix="/health", tags=["health"])

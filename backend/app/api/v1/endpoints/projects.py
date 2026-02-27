@@ -5,8 +5,6 @@ from app.models.user import CurrentUser
 from app.models.project import ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse
 from app.models.response import StandardResponse
 from app.db.supabase_client import get_supabase
-import uuid
-
 router = APIRouter()
 
 @router.post("", response_model=StandardResponse[ProjectResponse], status_code=201)
@@ -152,8 +150,13 @@ def delete_project(project_id: str, current_user: CurrentUser = Depends(get_curr
         
     if check_resp.data[0]["status"] != "draft":
         raise HTTPException(status_code=409, detail=f"Cannot delete project in '{check_resp.data[0]['status']}' status")
-        
-    db.table("cma_projects").delete().eq("id", project_id).eq("firm_id", str(current_user.firm_id)).execute()
+
+    # Soft delete: set status to 'deleted' equivalent by marking error with message
+    # The cma_projects table has no is_active column, so we use a status-based approach
+    db.table("cma_projects").update({
+        "status": "error",
+        "error_message": "Deleted by user"
+    }).eq("id", project_id).eq("firm_id", str(current_user.firm_id)).execute()
     
     db.table("audit_log").insert({
         "firm_id": str(current_user.firm_id),

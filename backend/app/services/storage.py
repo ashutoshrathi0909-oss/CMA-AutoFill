@@ -1,7 +1,4 @@
-import os
-from typing import Optional
 from app.db.supabase_client import get_supabase
-import uuid
 from datetime import datetime
 
 def upload_file(firm_id: str, project_id: str, file_name: str, file_bytes: bytes, content_type: str) -> str:
@@ -10,19 +7,17 @@ def upload_file(firm_id: str, project_id: str, file_name: str, file_bytes: bytes
     Returns the storage path.
     """
     db = get_supabase()
-    
+
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    storage_path = f"{firm_id}/{project_id}/{timestamp}_{file_name}"
-    
-    # Bucket name: cma-files
-    res = db.storage.from_("cma-files").upload(
+    safe_filename = file_name.replace(" ", "_")
+    storage_path = f"{firm_id}/{project_id}/{timestamp}_{safe_filename}"
+
+    db.storage.from_("cma-files").upload(
         file=file_bytes,
         path=storage_path,
         file_options={"content-type": content_type}
     )
-    
-    # Check if upload was successful (res should be a valid response)
-    # The client might raise an exception if it fails
+
     return storage_path
 
 def get_signed_url(storage_path: str, expires_in: int = 3600) -> str:

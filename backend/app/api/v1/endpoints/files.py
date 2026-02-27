@@ -6,7 +6,6 @@ from app.models.file import FileResponse, FileListResponse, GeneratedFileRespons
 from app.models.response import StandardResponse
 from app.db.supabase_client import get_supabase
 from app.services.storage import upload_file, get_signed_url
-from datetime import datetime
 
 router = APIRouter()
 
@@ -41,17 +40,14 @@ async def upload_project_file(
     if len(file_bytes) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="File size exceeds 10MB limit")
         
-    # Upload to storage
+    # Upload to storage using the storage service
     try:
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        safe_filename = file.filename.replace(" ", "_")
-        storage_path = f"{current_user.firm_id}/{project_id}/{timestamp}_{safe_filename}"
-        
-        # Use simple supabase upload
-        db.storage.from_("cma-files").upload(
-            path=storage_path,
-            file=file_bytes,
-            file_options={"content-type": file.content_type}
+        storage_path = upload_file(
+            firm_id=str(current_user.firm_id),
+            project_id=project_id,
+            file_name=file.filename,
+            file_bytes=file_bytes,
+            content_type=file.content_type,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to upload to storage: {str(e)}")
