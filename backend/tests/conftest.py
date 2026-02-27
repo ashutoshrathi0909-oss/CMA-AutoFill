@@ -175,15 +175,24 @@ class MockSupabase:
 def mock_db():
     """Provide a MockSupabase and patch get_supabase to return it."""
     db = MockSupabase()
-    with patch("app.db.supabase_client.get_supabase", return_value=db):
-        # Also patch every module that imports get_supabase directly
-        with patch("app.core.auth.get_supabase", return_value=db):
-            with patch("app.api.v1.endpoints.clients.get_supabase", return_value=db):
-                with patch("app.api.v1.endpoints.projects.get_supabase", return_value=db):
-                    with patch("app.api.v1.endpoints.files.get_supabase", return_value=db):
-                        with patch("app.api.v1.endpoints.dashboard.get_supabase", return_value=db):
-                            with patch("app.api.v1.endpoints.auth.get_supabase", return_value=db):
-                                yield db
+    patches = [
+        "app.db.supabase_client.get_supabase",
+        "app.core.auth.get_supabase",
+        "app.api.v1.endpoints.clients.get_supabase",
+        "app.api.v1.endpoints.projects.get_supabase",
+        "app.api.v1.endpoints.files.get_supabase",
+        "app.api.v1.endpoints.dashboard.get_supabase",
+        "app.api.v1.endpoints.auth.get_supabase",
+        "app.api.v1.endpoints.extraction.get_supabase",
+        "app.services.extraction.merger.get_supabase",
+        "app.services.gemini_client.get_supabase",
+    ]
+    # Stack all patches
+    import contextlib
+    with contextlib.ExitStack() as stack:
+        for target in patches:
+            stack.enter_context(patch(target, return_value=db))
+        yield db
 
 
 @pytest.fixture

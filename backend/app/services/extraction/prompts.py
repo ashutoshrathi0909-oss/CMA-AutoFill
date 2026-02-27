@@ -81,5 +81,3 @@ Example output for Sales = 15,00,000 and Purchases = 9,00,000:
   }
 }
 """
-
-EXTRACTION_CLEANUP_PROMPT = """Compare this extracted data against the document. Fix any errors, including missing items or malformed numbers."""

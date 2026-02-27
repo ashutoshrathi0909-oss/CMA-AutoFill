@@ -35,6 +35,9 @@ build/
 !reference/*.xls
 !reference/*.xlsm
 
+# One-shot migration scripts
+backend/alter_db.py
+
 # Logs
 *.log
 npm-debug.log*

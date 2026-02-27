@@ -12,3 +12,4 @@ pdfplumber
 python-multipart
 PyJWT
 pytest
+reportlab
