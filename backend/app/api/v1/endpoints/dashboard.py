@@ -7,7 +7,7 @@ from datetime import datetime
 
 router = APIRouter()
 
-ALL_STATUSES = ["draft", "extracting", "classifying", "reviewing", "validating", "generating", "completed", "error"]
+ALL_STATUSES = ["draft", "extracting", "extracted", "classifying", "reviewing", "validating", "generating", "completed", "error"]
 
 
 @router.get("/stats", response_model=StandardResponse[dict])
