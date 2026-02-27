@@ -1,0 +1,143 @@
+{
+  "version": "1.0",
+  "total_rules": 6,
+  "last_updated": "2026-02-27",
+  "rules": [
+    {
+      "id": 1,
+      "source_terms": [
+        "Sales",
+        "Revenue from Operations",
+        "Turnover",
+        "Sales A/c",
+        "Income from Sales"
+      ],
+      "target_row": 5,
+      "target_sheet": "operating_statement",
+      "target_label": "Net Sales / Income from Operations",
+      "entity_types": [
+        "trading",
+        "manufacturing",
+        "service"
+      ],
+      "document_types": [
+        "profit_and_loss"
+      ],
+      "priority": 1,
+      "match_type": "exact_or_fuzzy",
+      "notes": "Primary revenue line. May appear as multiple variants."
+    },
+    {
+      "id": 2,
+      "source_terms": [
+        "Purchases",
+        "Purchase of Stock-in-Trade",
+        "Cost of Goods Purchased"
+      ],
+      "target_row": 10,
+      "target_sheet": "operating_statement",
+      "target_label": "Cost of Goods Sold - Purchases",
+      "entity_types": [
+        "trading"
+      ],
+      "document_types": [
+        "profit_and_loss"
+      ],
+      "priority": 1,
+      "match_type": "exact_or_fuzzy",
+      "notes": "Trading firms only. Manufacturing firms use raw materials."
+    },
+    {
+      "id": 3,
+      "source_terms": [
+        "Sundry Debtors",
+        "Accounts Receivable",
+        "Trade Receivables"
+      ],
+      "target_row": 45,
+      "target_sheet": "balance_sheet",
+      "target_label": "Sundry Debtors",
+      "entity_types": [
+        "trading",
+        "manufacturing",
+        "service"
+      ],
+      "document_types": [
+        "balance_sheet",
+        "trial_balance"
+      ],
+      "priority": 1,
+      "match_type": "exact_or_fuzzy",
+      "notes": "Current assets"
+    },
+    {
+      "id": 4,
+      "source_terms": [
+        "Sundry Creditors",
+        "Accounts Payable",
+        "Trade Payables"
+      ],
+      "target_row": 115,
+      "target_sheet": "balance_sheet",
+      "target_label": "Sundry Creditors",
+      "entity_types": [
+        "trading",
+        "manufacturing",
+        "service"
+      ],
+      "document_types": [
+        "balance_sheet",
+        "trial_balance"
+      ],
+      "priority": 1,
+      "match_type": "exact_or_fuzzy",
+      "notes": "Current liabilities"
+    },
+    {
+      "id": 5,
+      "source_terms": [
+        "Depreciation",
+        "Dep.",
+        "Depreciation A/c",
+        "Depreciation on Fixed Assets"
+      ],
+      "target_row": 25,
+      "target_sheet": "operating_statement",
+      "target_label": "Depreciation",
+      "entity_types": [
+        "trading",
+        "manufacturing",
+        "service"
+      ],
+      "document_types": [
+        "profit_and_loss"
+      ],
+      "priority": 1,
+      "match_type": "exact_or_fuzzy",
+      "notes": "Non-cash operating expense"
+    },
+    {
+      "id": 6,
+      "source_terms": [
+        "Salaries",
+        "Wages",
+        "Salary & Wages",
+        "Employee Benefit Expenses"
+      ],
+      "target_row": 18,
+      "target_sheet": "operating_statement",
+      "target_label": "Personnel Expenses",
+      "entity_types": [
+        "trading",
+        "manufacturing",
+        "service"
+      ],
+      "document_types": [
+        "profit_and_loss"
+      ],
+      "priority": 2,
+      "match_type": "exact_or_fuzzy",
+      "notes": "Employee related costs"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-# Phase 04: Document Extraction — Detailed Documentation
+ # Phase 04: Document Extraction — Detailed Documentation
 
 ## Overview
 Phase 04 establishes the core document parsing and financial extraction pipeline for the CMA AutoFill system. The primary goal is to safely consume uploaded `.xlsx`, `.pdf` (both digital and scanned), `.jpg`, and `.png` files, interpret the accounting structure inside, and output it in a strictly typed JSON structure securely tied to the originating `project` and `firm`. This phase also introduces the first layer of Gemini API integrations.
