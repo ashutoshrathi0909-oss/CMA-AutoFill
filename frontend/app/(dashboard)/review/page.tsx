@@ -1,13 +1,14 @@
 import { ReviewQueue } from '@/components/review/review-queue';
 
 // Using a searchParams prop for Next.js App Router Page components
-export default function ReviewPage({
+export default async function ReviewPage({
     searchParams,
 }: {
-    searchParams: { [key: string]: string | string[] | undefined };
+    searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
     // If a project_id comes in from the URL (e.g., ?project_id=123), extract it
-    const projectIdParam = searchParams.project_id;
+    const params = await searchParams;
+    const projectIdParam = params.project_id;
     const projectId = Array.isArray(projectIdParam) ? projectIdParam[0] : projectIdParam;
 
     return (
