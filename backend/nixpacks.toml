@@ -1,0 +1,11 @@
+# Disable .env.example auto-detection so Nixpacks doesn't require
+# all listed vars as build-time secrets. Our env vars are runtime-only,
+# set in Railway's dashboard.
+[phases.setup]
+nixPkgs = ["python312"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[start]
+cmd = "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
