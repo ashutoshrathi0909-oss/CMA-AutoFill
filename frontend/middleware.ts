@@ -8,6 +8,14 @@ export async function middleware(request: NextRequest) {
         },
     });
 
+    // E2E test bypass — only in non-production environments
+    if (
+        process.env.NODE_ENV !== 'production' &&
+        request.cookies.get('e2e-auth-bypass')?.value === 'true'
+    ) {
+        return response;
+    }
+
     const supabase = createServerClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
