@@ -1,21 +1,22 @@
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
+'use client';
 
-/**
- * Auth layout — if user already has a session cookie, redirect to dashboard.
- */
-export default async function AuthLayout({
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/auth-context';
+
+export default function AuthLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
-    const cookieStore = await cookies();
-    const allCookies = cookieStore.getAll();
-    const hasSession = allCookies.some((c) => c.name.includes('-auth-token'));
+    const { user, isLoading } = useAuth();
+    const router = useRouter();
 
-    if (hasSession) {
-        redirect('/dashboard');
-    }
+    useEffect(() => {
+        if (!isLoading && user) {
+            router.replace('/dashboard');
+        }
+    }, [user, isLoading, router]);
 
     return (
         <div
