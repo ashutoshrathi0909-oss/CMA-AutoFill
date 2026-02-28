@@ -1,19 +1,23 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Mail, Loader2, CheckCircle, ArrowRight } from 'lucide-react';
+import { Mail, Loader2, CheckCircle, ArrowRight, Lock, KeyRound } from 'lucide-react';
 
 export default function LoginPage() {
-    const { signIn } = useAuth();
+    const { signIn, signInWithPassword } = useAuth();
+    const router = useRouter();
     const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [isSent, setIsSent] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [usePassword, setUsePassword] = useState(false);
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleMagicLink = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(null);
 
@@ -29,6 +33,34 @@ export default function LoginPage() {
                 setError(result.error);
             } else {
                 setIsSent(true);
+            }
+        } catch {
+            setError('An unexpected error occurred. Please try again.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handlePasswordLogin = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError(null);
+
+        if (!email || !email.includes('@')) {
+            setError('Please enter a valid email address');
+            return;
+        }
+        if (!password) {
+            setError('Please enter your password');
+            return;
+        }
+
+        setIsLoading(true);
+        try {
+            const result = await signInWithPassword(email, password);
+            if (result.error) {
+                setError(result.error);
+            } else {
+                router.push('/dashboard');
             }
         } catch {
             setError('An unexpected error occurred. Please try again.');
@@ -80,14 +112,16 @@ export default function LoginPage() {
             ) : (
                 /* Login Form */
                 <form
-                    onSubmit={handleSubmit}
+                    onSubmit={usePassword ? handlePasswordLogin : handleMagicLink}
                     className="rounded-xl p-8 space-y-6 border border-border/20"
                     style={{ backgroundColor: 'var(--bg-card)' }}
                 >
                     <div className="space-y-2">
                         <h2 className="text-xl font-semibold text-foreground">Sign in</h2>
                         <p className="text-sm text-muted-foreground">
-                            Enter your email to receive a magic link
+                            {usePassword
+                                ? 'Enter your email and password'
+                                : 'Enter your email to receive a magic link'}
                         </p>
                     </div>
 
@@ -108,6 +142,23 @@ export default function LoginPage() {
                             />
                         </div>
 
+                        {usePassword && (
+                            <div className="relative">
+                                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                    type="password"
+                                    placeholder="Password"
+                                    value={password}
+                                    onChange={(e) => {
+                                        setPassword(e.target.value);
+                                        setError(null);
+                                    }}
+                                    className="pl-10 h-12 bg-background/50 border-border/30 focus:border-gold focus:ring-gold/30"
+                                    disabled={isLoading}
+                                />
+                            </div>
+                        )}
+
                         {error && (
                             <p className="text-sm text-destructive flex items-center gap-2">
                                 <span className="h-1 w-1 rounded-full bg-destructive" />
@@ -123,7 +174,12 @@ export default function LoginPage() {
                             {isLoading ? (
                                 <>
                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Sending...
+                                    {usePassword ? 'Signing in...' : 'Sending...'}
+                                </>
+                            ) : usePassword ? (
+                                <>
+                                    Sign In
+                                    <ArrowRight className="ml-2 h-4 w-4" />
                                 </>
                             ) : (
                                 <>
@@ -134,9 +190,29 @@ export default function LoginPage() {
                         </Button>
                     </div>
 
-                    <p className="text-xs text-center text-muted-foreground">
-                        No password needed. We&apos;ll send you a secure link to sign in.
-                    </p>
+                    <div className="relative">
+                        <div className="absolute inset-0 flex items-center">
+                            <div className="w-full border-t border-border/30" />
+                        </div>
+                        <div className="relative flex justify-center text-xs">
+                            <span className="px-2 text-muted-foreground" style={{ backgroundColor: 'var(--bg-card)' }}>
+                                or
+                            </span>
+                        </div>
+                    </div>
+
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        className="w-full text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                            setUsePassword(!usePassword);
+                            setError(null);
+                        }}
+                    >
+                        <KeyRound className="mr-2 h-4 w-4" />
+                        {usePassword ? 'Use magic link instead' : 'Sign in with password'}
+                    </Button>
                 </form>
             )}
         </div>
