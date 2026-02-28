@@ -1,22 +1,29 @@
-'use client';
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { DashboardShell } from './dashboard-shell';
 
-import { Sidebar } from '@/components/layout/sidebar';
-import { Header } from '@/components/layout/header';
-
-export default function DashboardLayout({
+/**
+ * Server-side auth guard for all dashboard routes.
+ *
+ * Checks for Supabase session cookies before rendering. This replaces
+ * the Edge Runtime middleware approach which crashed on Vercel due to
+ * __dirname not being available in Edge Runtime.
+ *
+ * Supabase stores auth tokens in cookies named `sb-<ref>-auth-token`.
+ * We just check existence — JWT verification happens on the API server.
+ */
+export default async function DashboardLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
-    return (
-        <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--background)' }}>
-            <Sidebar />
-            <div className="flex flex-1 flex-col overflow-hidden">
-                <Header />
-                <main className="flex-1 overflow-y-auto p-6">
-                    <div className="animate-fade-in">{children}</div>
-                </main>
-            </div>
-        </div>
-    );
+    const cookieStore = await cookies();
+    const allCookies = cookieStore.getAll();
+    const hasSession = allCookies.some((c) => c.name.includes('-auth-token'));
+
+    if (!hasSession) {
+        redirect('/login');
+    }
+
+    return <DashboardShell>{children}</DashboardShell>;
 }
