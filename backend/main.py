@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,6 +36,18 @@ app.add_middleware(
     allow_methods=ALLOWED_METHODS,
     allow_headers=ALLOWED_HEADERS,
 )
+
+
+# ── Response Timing Middleware ───────────────────────────────────────────
+@app.middleware("http")
+async def add_response_timing(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - start) * 1000
+    response.headers["X-Response-Time"] = f"{duration_ms:.0f}ms"
+    if duration_ms > 500:
+        logger.warning("Slow endpoint: %s %s took %.0fms", request.method, request.url.path, duration_ms)
+    return response
 
 
 # ── Global Exception Handler ────────────────────────────────────────────
