@@ -1,8 +1,26 @@
-import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+/**
+ * Lightweight auth middleware that checks for Supabase session cookies
+ * WITHOUT importing @supabase/ssr (which pulls in Node.js dependencies
+ * that crash Vercel's Edge Runtime with "__dirname is not defined").
+ *
+ * How it works:
+ * - Supabase stores auth tokens in cookies named `sb-<ref>-auth-token`
+ * - We just check if any such cookie exists — if so, the user is logged in
+ * - We DON'T verify the JWT here — that's the API server's job
+ * - This keeps the middleware bundle tiny and Edge-safe
+ */
+
+function hasSupabaseSession(request: NextRequest): boolean {
+    const cookies = request.cookies.getAll();
+    // Supabase auth cookies follow the pattern: sb-<project-ref>-auth-token
+    // They may be chunked: sb-<ref>-auth-token.0, sb-<ref>-auth-token.1, etc.
+    return cookies.some((cookie) => cookie.name.includes('-auth-token'));
+}
+
 export async function middleware(request: NextRequest) {
-    let response = NextResponse.next({
+    const response = NextResponse.next({
         request: {
             headers: request.headers,
         },
@@ -16,46 +34,18 @@ export async function middleware(request: NextRequest) {
         return response;
     }
 
-    const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-            cookies: {
-                getAll() {
-                    return request.cookies.getAll();
-                },
-                setAll(cookiesToSet) {
-                    cookiesToSet.forEach(({ name, value }) =>
-                        request.cookies.set(name, value)
-                    );
-                    response = NextResponse.next({
-                        request: {
-                            headers: request.headers,
-                        },
-                    });
-                    cookiesToSet.forEach(({ name, value, options }) =>
-                        response.cookies.set(name, value, options)
-                    );
-                },
-            },
-        }
-    );
-
-    const {
-        data: { user },
-    } = await supabase.auth.getUser();
-
+    const hasSession = hasSupabaseSession(request);
     const { pathname } = request.nextUrl;
 
-    // If user is not logged in and trying to access dashboard pages, redirect to login
-    if (!user && !pathname.startsWith('/login') && !pathname.startsWith('/auth')) {
+    // If user has no session and trying to access dashboard pages, redirect to login
+    if (!hasSession && !pathname.startsWith('/login') && !pathname.startsWith('/auth')) {
         const url = request.nextUrl.clone();
         url.pathname = '/login';
         return NextResponse.redirect(url);
     }
 
-    // If user is logged in and trying to access login page, redirect to dashboard
-    if (user && pathname.startsWith('/login')) {
+    // If user has session and trying to access login page, redirect to dashboard
+    if (hasSession && pathname.startsWith('/login')) {
         const url = request.nextUrl.clone();
         url.pathname = '/dashboard';
         return NextResponse.redirect(url);
