@@ -13,6 +13,7 @@ from app.services.pipeline.orchestrator import (
     should_run,
     PipelineOptions,
     PipelineResult,
+    StepResult,
 )
 from app.services.pipeline.error_handler import with_retry, TransientError, PermanentError
 
@@ -103,6 +104,8 @@ def _make_mock_db():
                 return MockQuery([])
             if name == "classification_precedents":
                 return MockQuery([])
+            if name == "audit_log":
+                return MockQuery([])
             return MockQuery([])
 
     return DB()
@@ -121,6 +124,7 @@ class TestShouldRun:
         opts = PipelineOptions(start_from="validate")
         assert should_run("extract", "draft", opts) is False
         assert should_run("classify", "draft", opts) is False
+        assert should_run("review", "draft", opts) is False
         assert should_run("validate", "draft", opts) is True
         assert should_run("generate", "draft", opts) is True
 
@@ -128,6 +132,11 @@ class TestShouldRun:
         opts = PipelineOptions()
         assert should_run("extract", "draft", opts) is True
         assert should_run("classify", "draft", opts) is True
+
+    def test_default_flow_from_extracted(self):
+        opts = PipelineOptions()
+        assert should_run("extract", "extracted", opts) is False
+        assert should_run("classify", "extracted", opts) is True
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -138,38 +147,36 @@ class TestHappyPath:
         mock_db = _make_mock_db()
         monkeypatch.setattr("app.services.pipeline.orchestrator.get_supabase", lambda: mock_db)
 
-        # Mock extraction
         monkeypatch.setattr(
             "app.services.pipeline.orchestrator._run_extract",
-            lambda pid, fid: __import__("app.services.pipeline.orchestrator", fromlist=["StepResult"]).StepResult(success=True, duration_ms=100),
+            lambda pid, fid: StepResult(success=True, duration_ms=100),
         )
-        # Mock classification
         monkeypatch.setattr(
             "app.services.pipeline.orchestrator._run_classify",
-            lambda pid, fid, et: __import__("app.services.pipeline.orchestrator", fromlist=["StepResult"]).StepResult(success=True, duration_ms=200, llm_cost_usd=0.002),
+            lambda pid, fid, et: StepResult(success=True, duration_ms=200, llm_cost_usd=0.002),
         )
-        # Mock review check (no items)
         monkeypatch.setattr(
             "app.services.pipeline.orchestrator._run_review_check",
-            lambda pid, fid, opts: __import__("app.services.pipeline.orchestrator", fromlist=["StepResult"]).StepResult(success=True, needs_review=False, duration_ms=10),
+            lambda pid, fid, opts: StepResult(success=True, needs_review=False, duration_ms=10),
         )
-        # Mock validation
         monkeypatch.setattr(
             "app.services.pipeline.orchestrator._run_validate",
-            lambda pid, fid, et, skip=False: __import__("app.services.pipeline.orchestrator", fromlist=["StepResult"]).StepResult(success=True, duration_ms=15),
+            lambda pid, fid, et, skip=False: StepResult(success=True, duration_ms=15),
         )
-        # Mock generation
         monkeypatch.setattr(
             "app.services.pipeline.orchestrator._run_generate",
-            lambda pid, fid, skip_validation=False: __import__("app.services.pipeline.orchestrator", fromlist=["StepResult"]).StepResult(success=True, duration_ms=50),
+            lambda pid, fid, skip_validation=False: StepResult(success=True, duration_ms=50),
         )
 
         result = run_pipeline(MOCK_PROJECT_ID, MOCK_FIRM_ID, PipelineOptions(skip_review=True))
 
         assert result.stopped_reason == "completed"
         assert "extract" in result.completed_steps
+        assert "classify" in result.completed_steps
+        assert "validate" in result.completed_steps
         assert "generate" in result.completed_steps
         assert result.duration_ms >= 0
+        assert result.llm_cost_usd == 0.002
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -182,16 +189,15 @@ class TestReviewPause:
 
         monkeypatch.setattr(
             "app.services.pipeline.orchestrator._run_extract",
-            lambda pid, fid: __import__("app.services.pipeline.orchestrator", fromlist=["StepResult"]).StepResult(success=True, duration_ms=100),
+            lambda pid, fid: StepResult(success=True, duration_ms=100),
         )
         monkeypatch.setattr(
             "app.services.pipeline.orchestrator._run_classify",
-            lambda pid, fid, et: __import__("app.services.pipeline.orchestrator", fromlist=["StepResult"]).StepResult(success=True, needs_review=True, review_count=5, duration_ms=200, llm_cost_usd=0.003),
+            lambda pid, fid, et: StepResult(success=True, needs_review=True, review_count=5, duration_ms=200, llm_cost_usd=0.003),
         )
-        # Review check finds items
         monkeypatch.setattr(
             "app.services.pipeline.orchestrator._run_review_check",
-            lambda pid, fid, opts: __import__("app.services.pipeline.orchestrator", fromlist=["StepResult"]).StepResult(success=True, needs_review=True, review_count=5, duration_ms=10),
+            lambda pid, fid, opts: StepResult(success=True, needs_review=True, review_count=5, duration_ms=10),
         )
 
         result = run_pipeline(MOCK_PROJECT_ID, MOCK_FIRM_ID, PipelineOptions())
@@ -199,6 +205,7 @@ class TestReviewPause:
         assert result.stopped_reason == "awaiting_review"
         assert "extract" in result.completed_steps
         assert "classify" in result.completed_steps
+        assert "review" in result.completed_steps
         assert "generate" not in result.completed_steps
 
 
@@ -212,7 +219,7 @@ class TestExtractionFailure:
 
         monkeypatch.setattr(
             "app.services.pipeline.orchestrator._run_extract",
-            lambda pid, fid: __import__("app.services.pipeline.orchestrator", fromlist=["StepResult"]).StepResult(success=False, error="Invalid PDF", duration_ms=50),
+            lambda pid, fid: StepResult(success=False, error="Invalid PDF", duration_ms=50),
         )
 
         result = run_pipeline(MOCK_PROJECT_ID, MOCK_FIRM_ID)
@@ -220,6 +227,180 @@ class TestExtractionFailure:
         assert result.stopped_reason == "extraction_failed"
         assert len(result.errors) == 1
         assert result.errors[0]["step"] == "extract"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Test: Validation failure
+# ─────────────────────────────────────────────────────────────────────────
+class TestValidationFailure:
+    def test_validation_errors_stop_pipeline(self, monkeypatch):
+        mock_db = _make_mock_db()
+        monkeypatch.setattr("app.services.pipeline.orchestrator.get_supabase", lambda: mock_db)
+
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_extract",
+            lambda pid, fid: StepResult(success=True, duration_ms=100),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_classify",
+            lambda pid, fid, et: StepResult(success=True, duration_ms=200),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_review_check",
+            lambda pid, fid, opts: StepResult(success=True, needs_review=False, duration_ms=10),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_validate",
+            lambda pid, fid, et, skip=False: StepResult(success=False, error="2 validation error(s): BS does not balance", duration_ms=20),
+        )
+
+        result = run_pipeline(MOCK_PROJECT_ID, MOCK_FIRM_ID, PipelineOptions())
+
+        assert result.stopped_reason == "validation_errors"
+        assert len(result.errors) == 1
+        assert result.errors[0]["step"] == "validate"
+        assert "generate" not in result.completed_steps
+
+    def test_validation_skipped_continues(self, monkeypatch):
+        mock_db = _make_mock_db()
+        monkeypatch.setattr("app.services.pipeline.orchestrator.get_supabase", lambda: mock_db)
+
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_extract",
+            lambda pid, fid: StepResult(success=True, duration_ms=100),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_classify",
+            lambda pid, fid, et: StepResult(success=True, duration_ms=200),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_review_check",
+            lambda pid, fid, opts: StepResult(success=True, needs_review=False, duration_ms=10),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_validate",
+            lambda pid, fid, et, skip=False: StepResult(success=False, error="validation errors", duration_ms=20),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_generate",
+            lambda pid, fid, skip_validation=False: StepResult(success=True, duration_ms=50),
+        )
+
+        result = run_pipeline(MOCK_PROJECT_ID, MOCK_FIRM_ID, PipelineOptions(skip_validation=True))
+
+        assert result.stopped_reason == "completed"
+        assert "generate" in result.completed_steps
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Test: Generation failure
+# ─────────────────────────────────────────────────────────────────────────
+class TestGenerationFailure:
+    def test_generation_fails_stops_pipeline(self, monkeypatch):
+        mock_db = _make_mock_db()
+        monkeypatch.setattr("app.services.pipeline.orchestrator.get_supabase", lambda: mock_db)
+
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_extract",
+            lambda pid, fid: StepResult(success=True, duration_ms=100),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_classify",
+            lambda pid, fid, et: StepResult(success=True, duration_ms=200),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_review_check",
+            lambda pid, fid, opts: StepResult(success=True, needs_review=False, duration_ms=10),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_validate",
+            lambda pid, fid, et, skip=False: StepResult(success=True, duration_ms=15),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_generate",
+            lambda pid, fid, skip_validation=False: StepResult(success=False, error="Template file not found", duration_ms=30),
+        )
+
+        result = run_pipeline(MOCK_PROJECT_ID, MOCK_FIRM_ID, PipelineOptions(skip_review=True))
+
+        assert result.stopped_reason == "generation_failed"
+        assert len(result.errors) == 1
+        assert result.errors[0]["step"] == "generate"
+        assert "validate" in result.completed_steps
+        assert "generate" not in result.completed_steps
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Test: Resume pipeline after review
+# ─────────────────────────────────────────────────────────────────────────
+class TestResumePipeline:
+    def test_resume_skips_extract_and_classify(self, monkeypatch):
+        mock_db = _make_mock_db()
+        monkeypatch.setattr("app.services.pipeline.orchestrator.get_supabase", lambda: mock_db)
+
+        extract_called = False
+        classify_called = False
+
+        def track_extract(pid, fid):
+            nonlocal extract_called
+            extract_called = True
+            return StepResult(success=True, duration_ms=10)
+
+        def track_classify(pid, fid, et):
+            nonlocal classify_called
+            classify_called = True
+            return StepResult(success=True, duration_ms=10)
+
+        monkeypatch.setattr("app.services.pipeline.orchestrator._run_extract", track_extract)
+        monkeypatch.setattr("app.services.pipeline.orchestrator._run_classify", track_classify)
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_review_check",
+            lambda pid, fid, opts: StepResult(success=True, needs_review=False, duration_ms=10),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_validate",
+            lambda pid, fid, et, skip=False: StepResult(success=True, duration_ms=15),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_generate",
+            lambda pid, fid, skip_validation=False: StepResult(success=True, duration_ms=50),
+        )
+
+        result = resume_pipeline(MOCK_PROJECT_ID, MOCK_FIRM_ID)
+
+        assert result.stopped_reason == "completed"
+        assert extract_called is False
+        assert classify_called is False
+        assert "validate" in result.completed_steps
+        assert "generate" in result.completed_steps
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Test: Review check failure
+# ─────────────────────────────────────────────────────────────────────────
+class TestReviewCheckFailure:
+    def test_review_check_error_stops_pipeline(self, monkeypatch):
+        mock_db = _make_mock_db()
+        monkeypatch.setattr("app.services.pipeline.orchestrator.get_supabase", lambda: mock_db)
+
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_extract",
+            lambda pid, fid: StepResult(success=True, duration_ms=100),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_classify",
+            lambda pid, fid, et: StepResult(success=True, duration_ms=200),
+        )
+        monkeypatch.setattr(
+            "app.services.pipeline.orchestrator._run_review_check",
+            lambda pid, fid, opts: StepResult(success=False, error="DB connection lost", duration_ms=10),
+        )
+
+        result = run_pipeline(MOCK_PROJECT_ID, MOCK_FIRM_ID, PipelineOptions())
+
+        assert result.stopped_reason == "review_check_failed"
+        assert len(result.errors) == 1
+        assert result.errors[0]["step"] == "review"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -243,3 +424,30 @@ class TestRetryLogic:
     def test_permanent_error_no_retry(self):
         with pytest.raises(PermanentError):
             with_retry(lambda: (_ for _ in ()).throw(PermanentError("bad data")), max_retries=3, base_delay=0.01)
+
+    def test_exhausted_retries_raise_permanent(self):
+        with pytest.raises(PermanentError, match="Failed after 2 retries"):
+            with_retry(lambda: (_ for _ in ()).throw(TransientError("always rate-limited")), max_retries=2, base_delay=0.01)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Test: Project not found
+# ─────────────────────────────────────────────────────────────────────────
+class TestProjectNotFound:
+    def test_nonexistent_project_returns_not_found(self, monkeypatch):
+        class EmptyDB:
+            def table(self, name):
+                class Q:
+                    def select(self, *a, **kw): return self
+                    def eq(self, *a, **kw): return self
+                    def execute(self):
+                        class R:
+                            data = []
+                        return R()
+                return Q()
+        monkeypatch.setattr("app.services.pipeline.orchestrator.get_supabase", lambda: EmptyDB())
+
+        result = run_pipeline("nonexistent-id", "some-firm-id")
+
+        assert result.stopped_reason == "project_not_found"
+        assert result.duration_ms == 0

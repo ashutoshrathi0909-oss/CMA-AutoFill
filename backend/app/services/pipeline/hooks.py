@@ -31,6 +31,22 @@ def _safe_audit(firm_id: str, action: str, entity_id: str, metadata: dict | None
         logger.warning("Audit log write failed (%s): %s", action, exc)
 
 
+def _get_project_client_name(project_id: str) -> str:
+    """Look up the client name for a project. Returns 'Unknown' on any error."""
+    try:
+        db = get_supabase()
+        proj = db.table("cma_projects").select("client_id").eq("id", project_id).execute()
+        if not proj.data:
+            return "Unknown"
+        client_id = proj.data[0].get("client_id")
+        if not client_id:
+            return "Unknown"
+        client = db.table("clients").select("name").eq("id", client_id).execute()
+        return client.data[0]["name"] if client.data else "Unknown"
+    except Exception:
+        return "Unknown"
+
+
 # ── Step-level hooks ──────────────────────────────────────────────────────
 def on_step_start(project_id: str, firm_id: str, step_name: str):
     _safe_audit(firm_id, f"pipeline_{step_name}_start", project_id)
@@ -52,14 +68,11 @@ def on_pipeline_complete(project_id: str, firm_id: str, duration_ms: int, llm_co
     _safe_audit(firm_id, "pipeline_complete", project_id, {"duration_ms": duration_ms, "cost_usd": llm_cost_usd})
     logger.info("Pipeline [%s] COMPLETED (total %d ms, $%.4f)", project_id[:8], duration_ms, llm_cost_usd)
 
-    # Send 'ready to generate' email (best-effort)
+    # Send 'ready' email (best-effort)
     try:
         from app.services.notifications.email_service import send_ready_notification
-        db = get_supabase()
-        proj = db.table("cma_projects").select("client_id, clients(name)").eq("id", project_id).execute()
-        client_name = "Unknown"
-        if proj.data and proj.data[0].get("clients"):
-            client_name = proj.data[0]["clients"].get("name", "Unknown")
+
+        client_name = _get_project_client_name(project_id)
         send_ready_notification(firm_id, project_id, client_name, f"{client_name} CMA")
     except Exception as exc:
         logger.warning("Ready notification failed: %s", exc)
@@ -69,16 +82,25 @@ def on_review_needed(project_id: str, firm_id: str, review_count: int):
     _safe_audit(firm_id, "pipeline_review_needed", project_id, {"review_items": review_count})
     logger.info("Pipeline [%s] paused — %d items need review", project_id[:8], review_count)
 
-    # Send review-needed email (best-effort)
+    # Send review-needed email (best-effort) with actual review items
     try:
         from app.services.notifications.email_service import send_review_notification
-        db = get_supabase()
-        proj = db.table("cma_projects").select("client_id, clients(name)").eq("id", project_id).execute()
-        client_name = "Unknown"
-        if proj.data and proj.data[0].get("clients"):
-            client_name = proj.data[0]["clients"].get("name", "Unknown")
 
-        items_stub = []  # lightweight — full items not needed for email
-        send_review_notification(firm_id, project_id, client_name, f"{client_name} CMA", items_stub)
+        client_name = _get_project_client_name(project_id)
+
+        # Fetch actual pending review items for the email body
+        db = get_supabase()
+        pending = (
+            db.table("review_queue")
+            .select("source_item_name, source_item_amount, suggested_label, confidence")
+            .eq("cma_project_id", project_id)
+            .eq("firm_id", firm_id)
+            .eq("status", "pending")
+            .order("confidence")
+            .execute()
+        )
+        review_items = pending.data if pending.data else []
+
+        send_review_notification(firm_id, project_id, client_name, f"{client_name} CMA", review_items)
     except Exception as exc:
         logger.warning("Review notification failed: %s", exc)

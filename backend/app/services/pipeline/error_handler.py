@@ -2,7 +2,6 @@
 Task 8.4: Error recovery — retry decorator & resume helpers.
 """
 
-import asyncio
 import logging
 import time
 from typing import Callable, Any

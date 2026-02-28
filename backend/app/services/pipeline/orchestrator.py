@@ -13,6 +13,12 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel
 
 from app.db.supabase_client import get_supabase
+from app.services.pipeline.error_handler import (
+    with_retry,
+    TransientError,
+    classify_transient_error,
+    build_error_report,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +62,7 @@ class PipelineOptions(BaseModel):
 
 class PipelineResult(BaseModel):
     project_id: str
-    completed_steps: List[str]
+    completed_steps: List[str] = []
     current_step: Optional[str] = None
     stopped_reason: Optional[str] = None  # awaiting_review | validation_errors | completed | error
     duration_ms: int = 0
@@ -127,14 +133,63 @@ def should_run(step_name: str, project_status: str, options: PipelineOptions) ->
     return _step_index(step_name) >= _step_index(next_step)
 
 
+# ── Hook helpers (fire-and-forget) ────────────────────────────────────────
+def _hook_step_start(project_id: str, firm_id: str, step: str):
+    try:
+        from app.services.pipeline.hooks import on_step_start
+        on_step_start(project_id, firm_id, step)
+    except Exception:
+        logger.debug("Hook on_step_start failed for %s", step, exc_info=True)
+
+
+def _hook_step_complete(project_id: str, firm_id: str, step: str, duration_ms: int):
+    try:
+        from app.services.pipeline.hooks import on_step_complete
+        on_step_complete(project_id, firm_id, step, duration_ms)
+    except Exception:
+        logger.debug("Hook on_step_complete failed for %s", step, exc_info=True)
+
+
+def _hook_step_fail(project_id: str, firm_id: str, step: str, error: str):
+    try:
+        from app.services.pipeline.hooks import on_step_fail
+        on_step_fail(project_id, firm_id, step, error)
+    except Exception:
+        logger.debug("Hook on_step_fail failed for %s", step, exc_info=True)
+
+
+def _hook_pipeline_complete(project_id: str, firm_id: str, duration_ms: int, cost: float):
+    try:
+        from app.services.pipeline.hooks import on_pipeline_complete
+        on_pipeline_complete(project_id, firm_id, duration_ms, cost)
+    except Exception:
+        logger.debug("Hook on_pipeline_complete failed", exc_info=True)
+
+
+def _hook_review_needed(project_id: str, firm_id: str, count: int):
+    try:
+        from app.services.pipeline.hooks import on_review_needed
+        on_review_needed(project_id, firm_id, count)
+    except Exception:
+        logger.debug("Hook on_review_needed failed", exc_info=True)
+
+
 # ── Individual step runners ───────────────────────────────────────────────
 def _run_extract(project_id: str, firm_id: str) -> StepResult:
     """Run the extraction service for all uploaded files."""
-    from app.services.extraction.extractor import extract_project  # lazy import
+    from app.services.extraction.extractor import extract_project
 
     t0 = time.time()
     try:
-        result = extract_project(project_id, firm_id)
+        def _do_extract():
+            try:
+                return extract_project(project_id, firm_id)
+            except Exception as exc:
+                if classify_transient_error(exc):
+                    raise TransientError(str(exc)) from exc
+                raise
+
+        result = with_retry(_do_extract, max_retries=2, base_delay=2.0)
         return StepResult(success=True, duration_ms=int((time.time() - t0) * 1000))
     except Exception as e:
         logger.error("Extraction failed: %s", e)
@@ -148,7 +203,15 @@ def _run_classify(project_id: str, firm_id: str, entity_type: str) -> StepResult
 
     t0 = time.time()
     try:
-        class_res = classify_project(project_id, firm_id, entity_type)
+        def _do_classify():
+            try:
+                return classify_project(project_id, firm_id, entity_type)
+            except Exception as exc:
+                if classify_transient_error(exc):
+                    raise TransientError(str(exc)) from exc
+                raise
+
+        class_res = with_retry(_do_classify, max_retries=3, base_delay=3.0)
 
         # Persist classification_data
         db = get_supabase()
@@ -186,75 +249,101 @@ def _run_review_check(project_id: str, firm_id: str, options: PipelineOptions) -
     from app.services.classification.review_applier import apply_review_decisions
 
     t0 = time.time()
-    db = get_supabase()
+    try:
+        db = get_supabase()
 
-    if options.skip_review:
-        # Approve everything
-        pending = db.table("review_queue").select("id, suggested_row, suggested_sheet").eq("cma_project_id", project_id).eq("firm_id", firm_id).eq("status", "pending").execute()
-        for row in pending.data:
-            db.table("review_queue").update({
-                "status": "resolved",
-                "resolved_row": row["suggested_row"],
-                "resolved_sheet": row["suggested_sheet"],
-                "resolved_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", row["id"]).execute()
+        if options.skip_review:
+            # Approve everything
+            pending = (
+                db.table("review_queue")
+                .select("id, suggested_row, suggested_sheet")
+                .eq("cma_project_id", project_id)
+                .eq("firm_id", firm_id)
+                .eq("status", "pending")
+                .execute()
+            )
+            for row in pending.data:
+                db.table("review_queue").update({
+                    "status": "resolved",
+                    "resolved_row": row["suggested_row"],
+                    "resolved_sheet": row["suggested_sheet"],
+                    "resolved_at": datetime.now(timezone.utc).isoformat(),
+                }).eq("id", row["id"]).eq("firm_id", firm_id).execute()
 
-        apply_review_decisions(project_id, firm_id)
-        return StepResult(success=True, needs_review=False, duration_ms=int((time.time() - t0) * 1000))
+            apply_review_decisions(project_id, firm_id)
+            return StepResult(success=True, needs_review=False, duration_ms=int((time.time() - t0) * 1000))
 
-    if options.auto_approve_above and options.auto_approve_above < 1.0:
-        # Auto-approve items above threshold
-        high_conf = (
+        if options.auto_approve_above and options.auto_approve_above < 1.0:
+            # Auto-approve items above threshold
+            high_conf = (
+                db.table("review_queue")
+                .select("id, suggested_row, suggested_sheet")
+                .eq("cma_project_id", project_id)
+                .eq("firm_id", firm_id)
+                .eq("status", "pending")
+                .gte("confidence", options.auto_approve_above)
+                .execute()
+            )
+            for row in high_conf.data:
+                db.table("review_queue").update({
+                    "status": "resolved",
+                    "resolved_row": row["suggested_row"],
+                    "resolved_sheet": row["suggested_sheet"],
+                    "resolved_at": datetime.now(timezone.utc).isoformat(),
+                }).eq("id", row["id"]).eq("firm_id", firm_id).execute()
+
+        # Check remaining pending
+        remaining = (
             db.table("review_queue")
-            .select("id, suggested_row, suggested_sheet")
+            .select("id", count="exact")
             .eq("cma_project_id", project_id)
             .eq("firm_id", firm_id)
             .eq("status", "pending")
-            .gte("confidence", options.auto_approve_above)
             .execute()
         )
-        for row in high_conf.data:
-            db.table("review_queue").update({
-                "status": "resolved",
-                "resolved_row": row["suggested_row"],
-                "resolved_sheet": row["suggested_sheet"],
-                "resolved_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", row["id"]).execute()
+        still_pending = remaining.count if remaining.count else 0
 
-    # Check remaining pending
-    remaining = (
-        db.table("review_queue")
-        .select("id", count="exact")
-        .eq("cma_project_id", project_id)
-        .eq("firm_id", firm_id)
-        .eq("status", "pending")
-        .execute()
-    )
-    still_pending = remaining.count if remaining.count else 0
+        if still_pending > 0:
+            return StepResult(success=True, needs_review=True, review_count=still_pending, duration_ms=int((time.time() - t0) * 1000))
 
-    if still_pending > 0:
-        return StepResult(success=True, needs_review=True, review_count=still_pending, duration_ms=int((time.time() - t0) * 1000))
+        # All done — apply
+        apply_review_decisions(project_id, firm_id)
+        return StepResult(success=True, needs_review=False, duration_ms=int((time.time() - t0) * 1000))
 
-    # All done — apply
-    apply_review_decisions(project_id, firm_id)
-    return StepResult(success=True, needs_review=False, duration_ms=int((time.time() - t0) * 1000))
+    except Exception as e:
+        logger.error("Review check failed: %s", e)
+        return StepResult(success=False, error=str(e), duration_ms=int((time.time() - t0) * 1000))
 
 
 def _run_validate(project_id: str, firm_id: str, entity_type: str, skip: bool = False) -> StepResult:
     from app.services.validation.validator import validate_project as run_validation
 
     t0 = time.time()
-    db = get_supabase()
+    try:
+        db = get_supabase()
 
-    proj = db.table("cma_projects").select("classification_data").eq("id", project_id).execute()
-    classification_data = proj.data[0].get("classification_data", {}) if proj.data else {}
+        proj = (
+            db.table("cma_projects")
+            .select("classification_data")
+            .eq("id", project_id)
+            .eq("firm_id", firm_id)
+            .execute()
+        )
+        classification_data = proj.data[0].get("classification_data", {}) if proj.data else {}
 
-    val = run_validation(project_id, classification_data, entity_type)
+        val = run_validation(project_id, classification_data, entity_type)
 
-    if val.errors > 0 and not skip:
-        return StepResult(success=False, error=f"{val.errors} validation error(s): {val.summary}", duration_ms=int((time.time() - t0) * 1000))
+        if val.errors > 0 and not skip:
+            return StepResult(
+                success=False,
+                error=f"{val.errors} validation error(s): {val.summary}",
+                duration_ms=int((time.time() - t0) * 1000),
+            )
 
-    return StepResult(success=True, duration_ms=int((time.time() - t0) * 1000))
+        return StepResult(success=True, duration_ms=int((time.time() - t0) * 1000))
+    except Exception as e:
+        logger.error("Validation failed: %s", e)
+        return StepResult(success=False, error=str(e), duration_ms=int((time.time() - t0) * 1000))
 
 
 def _run_generate(project_id: str, firm_id: str, skip_validation: bool = False) -> StepResult:
@@ -294,22 +383,28 @@ def run_pipeline(project_id: str, firm_id: str, options: PipelineOptions | None 
     client_resp = db.table("clients").select("entity_type").eq("id", client_id).execute()
     entity_type = client_resp.data[0]["entity_type"] if client_resp.data else "trading"
 
-    steps_meta = _init_pipeline_steps(project_id)
+    _init_pipeline_steps(project_id)
 
     # ── Step 1: EXTRACT ──────────────────────────────────────────────────
     if should_run("extract", project_status, options):
         _mark_step(project_id, "extract", "running")
+        _hook_step_start(project_id, firm_id, "extract")
         _update_project(project_id, "extracting", 5)
 
         res = _run_extract(project_id, firm_id)
         if not res.success:
             _mark_step(project_id, "extract", "failed", res.duration_ms, res.error)
+            _hook_step_fail(project_id, firm_id, "extract", res.error or "")
             _update_project(project_id, "error", 5, error_message=res.error, is_processing=False)
-            return PipelineResult(project_id=project_id, stopped_reason="extraction_failed",
-                                  completed_steps=completed_steps, errors=[{"step": "extract", "message": res.error}],
-                                  duration_ms=int((time.time() - start) * 1000))
+            return PipelineResult(
+                project_id=project_id, stopped_reason="extraction_failed",
+                completed_steps=completed_steps,
+                errors=[build_error_report("extract", res.error or "Unknown error")],
+                duration_ms=int((time.time() - start) * 1000),
+            )
 
         _mark_step(project_id, "extract", "completed", res.duration_ms)
+        _hook_step_complete(project_id, firm_id, "extract", res.duration_ms)
         _update_project(project_id, "extracted", 25)
         completed_steps.append("extract")
     else:
@@ -318,6 +413,7 @@ def run_pipeline(project_id: str, firm_id: str, options: PipelineOptions | None 
     # ── Step 2: CLASSIFY ─────────────────────────────────────────────────
     if should_run("classify", project_status, options):
         _mark_step(project_id, "classify", "running")
+        _hook_step_start(project_id, firm_id, "classify")
         _update_project(project_id, "classifying", 30)
 
         res = _run_classify(project_id, firm_id, entity_type)
@@ -325,47 +421,78 @@ def run_pipeline(project_id: str, firm_id: str, options: PipelineOptions | None 
 
         if not res.success:
             _mark_step(project_id, "classify", "failed", res.duration_ms, res.error)
+            _hook_step_fail(project_id, firm_id, "classify", res.error or "")
             _update_project(project_id, "error", 30, error_message=res.error, is_processing=False)
-            return PipelineResult(project_id=project_id, stopped_reason="classification_failed",
-                                  completed_steps=completed_steps, errors=[{"step": "classify", "message": res.error}],
-                                  duration_ms=int((time.time() - start) * 1000), llm_cost_usd=total_cost)
+            return PipelineResult(
+                project_id=project_id, stopped_reason="classification_failed",
+                completed_steps=completed_steps,
+                errors=[build_error_report("classify", res.error or "Unknown error")],
+                duration_ms=int((time.time() - start) * 1000), llm_cost_usd=total_cost,
+            )
 
         _mark_step(project_id, "classify", "completed", res.duration_ms)
+        _hook_step_complete(project_id, firm_id, "classify", res.duration_ms)
         _update_project(project_id, "classified", 50)
         completed_steps.append("classify")
     else:
         _mark_step(project_id, "classify", "skipped")
 
     # ── Step 3: REVIEW CHECK ─────────────────────────────────────────────
-    _mark_step(project_id, "review", "running")
-    review_res = _run_review_check(project_id, firm_id, options)
+    if should_run("review", project_status, options):
+        _mark_step(project_id, "review", "running")
+        _hook_step_start(project_id, firm_id, "review")
+        review_res = _run_review_check(project_id, firm_id, options)
 
-    if review_res.needs_review:
+        if not review_res.success:
+            _mark_step(project_id, "review", "failed", review_res.duration_ms, review_res.error)
+            _hook_step_fail(project_id, firm_id, "review", review_res.error or "")
+            _update_project(project_id, "error", 50, error_message=review_res.error, is_processing=False)
+            return PipelineResult(
+                project_id=project_id, stopped_reason="review_check_failed",
+                completed_steps=completed_steps,
+                errors=[{"step": "review", "message": review_res.error}],
+                duration_ms=int((time.time() - start) * 1000), llm_cost_usd=total_cost,
+            )
+
+        if review_res.needs_review:
+            _mark_step(project_id, "review", "completed", review_res.duration_ms)
+            _hook_step_complete(project_id, firm_id, "review", review_res.duration_ms)
+            _hook_review_needed(project_id, firm_id, review_res.review_count)
+            _update_project(project_id, "reviewing", 50, is_processing=False)
+            completed_steps.append("review")
+            return PipelineResult(
+                project_id=project_id, stopped_reason="awaiting_review",
+                current_step="review", completed_steps=completed_steps,
+                duration_ms=int((time.time() - start) * 1000), llm_cost_usd=total_cost,
+            )
+
         _mark_step(project_id, "review", "completed", review_res.duration_ms)
-        _update_project(project_id, "reviewing", 50, is_processing=False)
+        _hook_step_complete(project_id, firm_id, "review", review_res.duration_ms)
+        _update_project(project_id, "validated", 60)
         completed_steps.append("review")
-        return PipelineResult(project_id=project_id, stopped_reason="awaiting_review",
-                              current_step="review", completed_steps=completed_steps,
-                              duration_ms=int((time.time() - start) * 1000), llm_cost_usd=total_cost)
-
-    _mark_step(project_id, "review", "completed", review_res.duration_ms)
-    _update_project(project_id, "validated", 60)
-    completed_steps.append("review")
+    else:
+        _mark_step(project_id, "review", "skipped")
 
     # ── Step 4: VALIDATE ─────────────────────────────────────────────────
     if should_run("validate", project_status, options):
         _mark_step(project_id, "validate", "running")
+        _hook_step_start(project_id, firm_id, "validate")
         _update_project(project_id, "validating", 65)
 
         val_res = _run_validate(project_id, firm_id, entity_type, skip=options.skip_validation)
         if not val_res.success and not options.skip_validation:
             _mark_step(project_id, "validate", "failed", val_res.duration_ms, val_res.error)
+            _hook_step_fail(project_id, firm_id, "validate", val_res.error or "")
             _update_project(project_id, "validation_failed", 65, is_processing=False, error_message=val_res.error)
-            return PipelineResult(project_id=project_id, stopped_reason="validation_errors",
-                                  completed_steps=completed_steps, errors=[{"step": "validate", "message": val_res.error}],
-                                  duration_ms=int((time.time() - start) * 1000), llm_cost_usd=total_cost)
+            return PipelineResult(
+                project_id=project_id, stopped_reason="validation_errors",
+                completed_steps=completed_steps,
+                errors=[build_error_report("validate", val_res.error or "Validation errors")],
+                duration_ms=int((time.time() - start) * 1000), llm_cost_usd=total_cost,
+            )
 
         _mark_step(project_id, "validate", "completed", val_res.duration_ms)
+        _hook_step_complete(project_id, firm_id, "validate", val_res.duration_ms)
         _update_project(project_id, "validated", 80)
         completed_steps.append("validate")
     else:
@@ -373,25 +500,34 @@ def run_pipeline(project_id: str, firm_id: str, options: PipelineOptions | None 
 
     # ── Step 5: GENERATE ─────────────────────────────────────────────────
     _mark_step(project_id, "generate", "running")
+    _hook_step_start(project_id, firm_id, "generate")
     _update_project(project_id, "generating", 85)
 
     gen_res = _run_generate(project_id, firm_id, skip_validation=True)  # already validated
     if not gen_res.success:
         _mark_step(project_id, "generate", "failed", gen_res.duration_ms, gen_res.error)
+        _hook_step_fail(project_id, firm_id, "generate", gen_res.error or "")
         _update_project(project_id, "error", 85, error_message=gen_res.error, is_processing=False)
-        return PipelineResult(project_id=project_id, stopped_reason="generation_failed",
-                              completed_steps=completed_steps, errors=[{"step": "generate", "message": gen_res.error}],
-                              duration_ms=int((time.time() - start) * 1000), llm_cost_usd=total_cost)
+        return PipelineResult(
+            project_id=project_id, stopped_reason="generation_failed",
+            completed_steps=completed_steps,
+            errors=[build_error_report("generate", gen_res.error or "Generation error")],
+            duration_ms=int((time.time() - start) * 1000), llm_cost_usd=total_cost,
+        )
 
     _mark_step(project_id, "generate", "completed", gen_res.duration_ms)
+    _hook_step_complete(project_id, firm_id, "generate", gen_res.duration_ms)
     _update_project(project_id, "completed", 100, is_processing=False)
     completed_steps.append("generate")
+
+    total_duration = int((time.time() - start) * 1000)
+    _hook_pipeline_complete(project_id, firm_id, total_duration, total_cost)
 
     return PipelineResult(
         project_id=project_id,
         completed_steps=completed_steps,
         stopped_reason="completed",
-        duration_ms=int((time.time() - start) * 1000),
+        duration_ms=total_duration,
         llm_cost_usd=total_cost,
     )
 
