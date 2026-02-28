@@ -13,5 +13,6 @@ python-multipart
 PyJWT
 pytest
 reportlab
+resend
 slowapi
 structlog
