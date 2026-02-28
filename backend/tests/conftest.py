@@ -1,5 +1,6 @@
+import contextlib
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from uuid import uuid4, UUID
 from datetime import datetime
@@ -71,6 +72,7 @@ def make_project_row(
         "loan_amount": None,
         "status": status,
         "extracted_data": None,
+        "classification_data": None,
         "classification_results": None,
         "validation_errors": None,
         "pipeline_progress": 0,
@@ -131,6 +133,12 @@ class MockQueryBuilder:
     def in_(self, *args, **kwargs):
         return self
 
+    def or_(self, *args, **kwargs):
+        return self
+
+    def is_(self, *args, **kwargs):
+        return self
+
     def gte(self, *args, **kwargs):
         return self
 
@@ -175,22 +183,31 @@ class MockSupabase:
 def mock_db():
     """Provide a MockSupabase and patch get_supabase to return it."""
     db = MockSupabase()
-    patches = [
+    targets = [
+        # Core
         "app.db.supabase_client.get_supabase",
         "app.core.auth.get_supabase",
+        # Phase 03 endpoints
         "app.api.v1.endpoints.clients.get_supabase",
         "app.api.v1.endpoints.projects.get_supabase",
         "app.api.v1.endpoints.files.get_supabase",
         "app.api.v1.endpoints.dashboard.get_supabase",
         "app.api.v1.endpoints.auth.get_supabase",
+        # Phase 04 — extraction
         "app.api.v1.endpoints.extraction.get_supabase",
         "app.services.extraction.merger.get_supabase",
         "app.services.gemini_client.get_supabase",
+        # Phase 05 — classification
+        "app.api.v1.endpoints.classification.get_supabase",
+        "app.api.v1.endpoints.review.get_supabase",
+        "app.services.classification.precedent_matcher.get_supabase",
+        "app.services.classification.review_service.get_supabase",
+        # Phase 06 — generation
+        "app.api.v1.endpoints.generation.get_supabase",
+        "app.services.excel.generator.get_supabase",
     ]
-    # Stack all patches
-    import contextlib
     with contextlib.ExitStack() as stack:
-        for target in patches:
+        for target in targets:
             stack.enter_context(patch(target, return_value=db))
         yield db
 
