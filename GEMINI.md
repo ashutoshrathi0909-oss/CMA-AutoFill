@@ -63,11 +63,11 @@ Auto-debug procedure:
 - [x] Phase 01: Project Init — ✅ Next.js 15 frontend (`:3000`), FastAPI backend (`:8000`), Supabase connected. Note: `gotrue` pinned to `2.10.0` (pure-Python wheel) to avoid Rust DLL blocked by Windows WDAC. `supabase` pinned to `2.10.0`.
 - [x] Phase 02: Database schema & RLS — ✅ All tables, RLS policies, auth trigger created.
 - [x] Phase 03: API CRUD — ✅ Auth middleware, /me, client CRUD, project CRUD, file upload/download, dashboard stats. Audit fixes applied (soft delete, singleton DB client, tests).
-- [ ] Phase 04: Document extraction
-- [ ] Phase 05: Classification AI
-- [ ] Phase 06: Validation & Excel
-- [ ] Phase 07: Review queue
-- [ ] Phase 08: Pipeline orchestrator
+- [x] Phase 04: Document extraction — ✅ Gemini 2.0 Flash extraction, PDF/image support, multi-file merge.
+- [x] Phase 05: Classification AI — ✅ Three-tier pipeline (precedent→rule→AI), review queue, Gemini 3 Flash.
+- [x] Phase 06: Validation & Excel — ✅ BS/PL/ratio validation, CMA writer, data transformer, generation pipeline.
+- [x] Phase 07: Review queue — ✅ Ask Father flow, resolve/bulk-resolve, precedent CRUD, learning metrics, email notifications.
+- [x] Phase 08: Pipeline orchestrator — ✅ One-click /process, background tasks, progress tracking, error recovery, hooks, integration tests.
 - [ ] Phase 09: Frontend shell
 - [ ] Phase 10: Frontend CMA flow
 - [ ] Phase 11: Testing & deploy

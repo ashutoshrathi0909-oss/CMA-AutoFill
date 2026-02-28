@@ -20,8 +20,8 @@ def apply_review_decisions(project_id: str, firm_id: str) -> ApplyResult:
     class_data = proj_res.data[0].get("classification_data") or {"items": []}
     items: List[Dict[str, Any]] = class_data.get("items", [])
     
-    # 2. Get resolved reviews
-    reviews_res = db.table("review_queue").select("source_item_name, source_item_amount, resolved_row, resolved_sheet").eq("cma_project_id", project_id).eq("status", "resolved").execute()
+    # 2. Get resolved reviews (scoped by firm_id for multi-tenant safety)
+    reviews_res = db.table("review_queue").select("source_item_name, source_item_amount, resolved_row, resolved_sheet").eq("cma_project_id", project_id).eq("firm_id", firm_id).eq("status", "resolved").execute()
     resolved_reviews = reviews_res.data
     
     # Map them for quick lookup

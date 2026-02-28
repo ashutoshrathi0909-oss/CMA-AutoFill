@@ -46,9 +46,9 @@ def health_db():
 @app.get("/health/llm")
 def health_llm():
     try:
-        api_key = os.getenv("GOOGLE_API_KEY")
+        api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            return {"status": "error", "message": "GOOGLE_API_KEY not found"}
+            return {"status": "error", "message": "GEMINI_API_KEY not found"}
         genai.configure(api_key=api_key)
         model_name = os.getenv("LLM_CLASSIFICATION_MODEL", "gemini-2.5-flash")
         model = genai.GenerativeModel(model_name)

@@ -86,6 +86,7 @@ class TestE2EGoldenMehta:
                 return output_path
 
         monkeypatch.setattr("app.services.excel.generator.CMAWriter", MockWriter)
+        monkeypatch.setattr("app.services.excel.generator._get_template_path", lambda: "/mock/CMA.xlsm")
 
         res = generate_cma(mock_proj_id, mock_firm_id, skip_validation=True)
         assert res is not None
