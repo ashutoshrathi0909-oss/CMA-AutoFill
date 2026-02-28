@@ -1,4 +1,3 @@
-import logging
 import os
 import time
 
@@ -9,10 +8,16 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api.v1.router import api_router
+from app.core.logging import setup_logging, get_logger
 from app.core.security import limiter, ALLOWED_METHODS, ALLOWED_HEADERS
 from app.db.supabase_client import get_supabase
 
-logger = logging.getLogger(__name__)
+# ── Initialize structured logging ───────────────────────────────────────
+setup_logging()
+logger = get_logger(__name__)
+
+# ── Track startup time for uptime calculation ────────────────────────────
+_startup_time = time.time()
 
 app = FastAPI(title="CMA AutoFill", version="1.0.0")
 
@@ -46,7 +51,12 @@ async def add_response_timing(request: Request, call_next):
     duration_ms = (time.perf_counter() - start) * 1000
     response.headers["X-Response-Time"] = f"{duration_ms:.0f}ms"
     if duration_ms > 500:
-        logger.warning("Slow endpoint: %s %s took %.0fms", request.method, request.url.path, duration_ms)
+        logger.warning(
+            "slow_endpoint",
+            method=request.method,
+            path=request.url.path,
+            duration_ms=round(duration_ms),
+        )
     return response
 
 
@@ -54,7 +64,13 @@ async def add_response_timing(request: Request, call_next):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Catch unhandled exceptions so stack traces are never leaked to clients."""
-    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    logger.error(
+        "unhandled_exception",
+        method=request.method,
+        path=request.url.path,
+        error=str(exc),
+        exc_info=True,
+    )
     return JSONResponse(
         status_code=500,
         content={
@@ -70,10 +86,25 @@ def read_root():
     return {"message": "CMA AutoFill API v1"}
 
 
-# ── Health Endpoints (safe — no internal details leaked) ─────────────────
+# ── Health Endpoints ─────────────────────────────────────────────────────
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "version": "1.0.0"}
+    """Enhanced health endpoint with system status."""
+    db_status = "unknown"
+    try:
+        get_supabase()
+        db_status = "connected"
+    except Exception:
+        db_status = "error"
+
+    uptime = int(time.time() - _startup_time)
+
+    return {
+        "status": "ok" if db_status == "connected" else "degraded",
+        "version": "1.0.0",
+        "uptime_seconds": uptime,
+        "database": db_status,
+    }
 
 
 @app.get("/health/db")
