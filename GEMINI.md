@@ -68,9 +68,9 @@ Auto-debug procedure:
 - [x] Phase 06: Validation & Excel — ✅ BS/PL/ratio validation, CMA writer, data transformer, generation pipeline.
 - [x] Phase 07: Review queue — ✅ Ask Father flow, resolve/bulk-resolve, precedent CRUD, learning metrics, email notifications.
 - [x] Phase 08: Pipeline orchestrator — ✅ One-click /process, background tasks, progress tracking, error recovery, hooks, integration tests.
-- [ ] Phase 09: Frontend shell
-- [ ] Phase 10: Frontend CMA flow
-- [ ] Phase 11: Testing & deploy
+- [x] Phase 09: Frontend shell — ✅ Complete auth, layout, dashboard, clients, projects list.
+- [x] Phase 10: Frontend CMA flow — ✅ End-to-end CMA pipeline UI (Upload, Processing, Ask Father review, Download).
+- [x] Phase 11: Testing & deploy — ✅ E2E tests (Playwright), security hardening (rate limiting, CORS, exception handler), performance (DB indexes, timing middleware), structured logging (structlog), CI/CD (GitHub Actions), LAUNCH_NOTES.md.
 
 ---
 

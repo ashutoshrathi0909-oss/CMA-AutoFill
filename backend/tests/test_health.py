@@ -8,13 +8,14 @@ def test_root_returns_message(authed_client: TestClient):
     assert res.json()["message"] == "CMA AutoFill API v1"
 
 
-def test_health_returns_status_version_environment(authed_client: TestClient):
+def test_health_returns_status_version_uptime(authed_client: TestClient):
     res = authed_client.get("/health")
     data = res.json()
     assert res.status_code == 200
     assert data["status"] == "ok"
     assert "version" in data
-    assert "environment" in data
+    assert "uptime_seconds" in data
+    assert "database" in data
 
 
 def test_health_db(authed_client: TestClient):

@@ -19,6 +19,12 @@ jobs:
           cd backend
           pip install -r requirements.txt
       - name: Run tests
+        env:
+          ENVIRONMENT: test
+          SUPABASE_URL: http://localhost:0
+          SUPABASE_SERVICE_ROLE_KEY: test-key
+          SUPABASE_JWT_SECRET: test-secret-key-for-ci-testing-only-min-32-chars
+          GOOGLE_API_KEY: test-key
         run: |
           cd backend
           python -m pytest tests/ -v --tb=short
