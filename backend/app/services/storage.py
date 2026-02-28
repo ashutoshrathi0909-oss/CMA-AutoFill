@@ -1,3 +1,4 @@
+from app.core.security import sanitize_filename
 from app.db.supabase_client import get_supabase
 from datetime import datetime
 
@@ -9,7 +10,7 @@ def upload_file(firm_id: str, project_id: str, file_name: str, file_bytes: bytes
     db = get_supabase()
 
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    safe_filename = file_name.replace(" ", "_")
+    safe_filename = sanitize_filename(file_name)
     storage_path = f"{firm_id}/{project_id}/{timestamp}_{safe_filename}"
 
     db.storage.from_("cma-files").upload(

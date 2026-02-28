@@ -10,10 +10,11 @@ Task 8.3 / 8.5: Pipeline API endpoints.
 import logging
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.core.auth import get_current_user
+from app.core.security import limiter
 from app.db.supabase_client import get_supabase
 from app.models.response import StandardResponse
 from app.models.user import CurrentUser
@@ -97,7 +98,9 @@ def get_pipeline_progress(project_id: str, current_user: CurrentUser = Depends(g
 
 # ── POST process (one-click) ─────────────────────────────────────────────
 @router.post("/{project_id}/process", response_model=StandardResponse[dict])
+@limiter.limit("10/hour")
 def start_pipeline(
+    request: Request,
     project_id: str,
     payload: Optional[ProcessRequest] = None,
     background_tasks: BackgroundTasks = None,
@@ -164,7 +167,9 @@ def start_pipeline(
 
 # ── POST retry (error recovery) ──────────────────────────────────────────
 @router.post("/{project_id}/retry", response_model=StandardResponse[dict])
+@limiter.limit("10/hour")
 def retry_pipeline(
+    request: Request,
     project_id: str,
     payload: Optional[RetryRequest] = None,
     background_tasks: BackgroundTasks = None,
@@ -220,7 +225,9 @@ def retry_pipeline(
 
 # ── POST resume (after CA review) ────────────────────────────────────────
 @router.post("/{project_id}/resume", response_model=StandardResponse[dict])
+@limiter.limit("10/hour")
 def resume_after_review(
+    request: Request,
     project_id: str,
     background_tasks: BackgroundTasks = None,
     current_user: CurrentUser = Depends(get_current_user),

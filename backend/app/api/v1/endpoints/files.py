@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, Query, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, UploadFile, File, Form
 from typing import Optional
 from app.core.auth import get_current_user
+from app.core.security import limiter, sanitize_filename
 from app.models.user import CurrentUser
 from app.models.file import FileResponse, FileListResponse, GeneratedFileResponse, GeneratedFileListResponse
 from app.models.response import StandardResponse
@@ -13,7 +14,9 @@ ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'pdf', 'jpg', 'png', 'csv'}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 @router.post("/projects/{project_id}/files", response_model=StandardResponse[FileResponse], status_code=201)
+@limiter.limit("20/hour")
 async def upload_project_file(
+    request: Request,
     project_id: str,
     file: UploadFile = File(...),
     document_type: Optional[str] = Form(None),
@@ -30,8 +33,11 @@ async def upload_project_file(
     if project["status"] not in ["draft", "extracting", "error"]:
         raise HTTPException(status_code=409, detail=f"Cannot upload files to project in '{project['status']}' status")
 
+    # Sanitize filename to prevent path traversal
+    safe_name = sanitize_filename(file.filename or "upload")
+
     # Validate file extension
-    ext = file.filename.split(".")[-1].lower() if "." in file.filename else ""
+    ext = safe_name.split(".")[-1].lower() if "." in safe_name else ""
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=422, detail=f"File type '.{ext}' not supported. Allowed: {', '.join(ALLOWED_EXTENSIONS)}")
         
@@ -45,18 +51,18 @@ async def upload_project_file(
         storage_path = upload_file(
             firm_id=str(current_user.firm_id),
             project_id=project_id,
-            file_name=file.filename,
+            file_name=safe_name,
             file_bytes=file_bytes,
             content_type=file.content_type,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to upload to storage: {str(e)}")
-        
+
     # Insert metadata
     file_record = {
         "firm_id": str(current_user.firm_id),
         "cma_project_id": project_id,
-        "file_name": file.filename,
+        "file_name": safe_name,
         "file_type": ext,
         "file_size": len(file_bytes),
         "storage_path": storage_path,
@@ -78,7 +84,7 @@ async def upload_project_file(
         "action": "upload_file",
         "entity_type": "uploaded_file",
         "entity_id": inserted_file["id"],
-        "metadata": {"file_name": file.filename, "project_id": project_id}
+        "metadata": {"file_name": safe_name, "project_id": project_id}
     }).execute()
     
     return StandardResponse(data=FileResponse(**inserted_file))
