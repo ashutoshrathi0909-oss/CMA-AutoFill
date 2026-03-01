@@ -116,7 +116,7 @@ export default function ClientsPage() {
         return <ErrorState message="Failed to load clients" onRetry={() => refetch()} />;
     }
 
-    const clients = data?.clients || [];
+    const clients = data?.items || [];
     const total = data?.total || 0;
     const totalPages = Math.ceil(total / 10);
 

@@ -78,7 +78,7 @@ export interface ClientListParams {
 }
 
 export interface ClientListResponse {
-    clients: Client[];
+    items: Client[];
     total: number;
     page: number;
     per_page: number;
@@ -137,7 +137,7 @@ export interface ProjectListParams {
 }
 
 export interface ProjectListResponse {
-    projects: Project[];
+    items: Project[];
     total: number;
     page: number;
     per_page: number;

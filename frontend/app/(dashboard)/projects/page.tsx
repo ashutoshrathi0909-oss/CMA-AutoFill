@@ -78,10 +78,10 @@ export default function ProjectsPage() {
         return <ErrorState message="Failed to load projects" onRetry={() => refetch()} />;
     }
 
-    const projects = data?.projects || [];
+    const projects = data?.items || [];
     const total = data?.total || 0;
     const totalPages = Math.ceil(total / 10);
-    const clients = clientsData?.clients || [];
+    const clients = clientsData?.items || [];
 
     return (
         <div className="space-y-6">
