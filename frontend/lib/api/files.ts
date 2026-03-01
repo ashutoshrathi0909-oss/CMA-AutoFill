@@ -11,11 +11,13 @@ export async function uploadFiles(projectId: string, files: File[]): Promise<Upl
 }
 
 export async function getProjectFiles(projectId: string): Promise<UploadedFile[]> {
-    return api.get<UploadedFile[]>(`/api/v1/projects/${projectId}/files`);
+    const res = await api.get<{ items: UploadedFile[] }>(`/api/v1/projects/${projectId}/files`);
+    return res.items || [];
 }
 
 export async function getGeneratedFiles(projectId: string): Promise<GeneratedFile[]> {
-    return api.get<GeneratedFile[]>(`/api/v1/projects/${projectId}/generated-files`);
+    const res = await api.get<{ items: GeneratedFile[] }>(`/api/v1/projects/${projectId}/generated-files`);
+    return res.items || [];
 }
 
 export async function deleteFile(fileId: string): Promise<void> {
